@@ -71,7 +71,11 @@ const noopSubscribe = () => () => {};
  */
 const IMMERSIVE_FROM = 0.015;
 const IMMERSIVE_UNTIL = 0.97;
+let immersive = false;
+/** Writes only on change: touching an attribute on <html> restyles the whole document, so never per frame. */
 function setImmersive(on: boolean) {
+  if (on === immersive) return;
+  immersive = on;
   const root = document.documentElement;
   if (on) root.dataset.immersive = "true";
   else delete root.dataset.immersive;
