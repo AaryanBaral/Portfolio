@@ -15,7 +15,8 @@ export function SmoothScroll() {
 
   useEffect(() => {
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    const lenis = new Lenis({ lerp: 0.085, anchors: true, autoRaf: false });
+    // Lower lerp + slightly damped wheel: longer, softer glide per scroll gesture.
+    const lenis = new Lenis({ lerp: 0.07, wheelMultiplier: 0.9, anchors: true, autoRaf: false });
     lenisRef.current = lenis;
     lenis.on("scroll", ScrollTrigger.update);
     const tick = (time: number) => lenis.raf(time * 1000);

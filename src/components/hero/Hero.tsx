@@ -70,7 +70,6 @@ const noopSubscribe = () => () => {};
  * they come back, so navigation is always one scroll away.
  */
 const IMMERSIVE_FROM = 0.015;
-const IMMERSIVE_UNTIL = 0.97;
 let immersive = false;
 /** Writes only on change: touching an attribute on <html> restyles the whole document, so never per frame. */
 function setImmersive(on: boolean) {
@@ -118,13 +117,10 @@ export function Hero() {
           start: "top top",
           end: "bottom bottom",
           // A touch more smoothing so a fast flick of the wheel can't skip a stage.
-          scrub: 1,
+          scrub: 1.25,
           onUpdate: (self) => {
             s.progress = self.progress;
-            setImmersive(self.progress > IMMERSIVE_FROM && self.progress < IMMERSIVE_UNTIL);
           },
-          onLeave: () => setImmersive(false),
-          onLeaveBack: () => setImmersive(false),
         },
       });
 
@@ -159,6 +155,10 @@ export function Hero() {
     let lastTag = "";
     const tick = (now: number) => {
       raf = requestAnimationFrame(tick);
+      // Immersive while the journey has started and the 3D stage still fills most of the screen — including the
+      // closing overview at 100%, until the next section actually scrolls in.
+      const box = section.getBoundingClientRect();
+      setImmersive(s.progress > IMMERSIVE_FROM && box.bottom > window.innerHeight * 0.6);
       const u = s.journey;
       if (progressRef.current) progressRef.current.style.transform = `scaleY(${s.progress})`;
       if (inspectorRef.current) inspectorRef.current.style.opacity = String(Math.max(0, (s.follow - 0.3) / 0.7));
@@ -264,8 +264,9 @@ export function Hero() {
               ref={(el) => {
                 captionRefs.current[i] = el;
               }}
-              className="invisible absolute bottom-32 left-6 right-6 opacity-0 md:bottom-36 md:left-10 md:right-auto md:max-w-md"
+              className="invisible absolute bottom-32 left-6 right-6 rounded-2xl border border-white/[0.06] bg-background/60 p-5 opacity-0 shadow-[0_20px_60px_-20px_rgba(0,0,0,0.8)] backdrop-blur-md md:bottom-36 md:left-10 md:right-auto md:max-w-md md:p-6"
             >
+
               <p className="font-mono text-xs tracking-[0.25em] text-accent uppercase">{stage.eyebrow}</p>
               <h2 className="mt-3 text-2xl font-medium tracking-tight md:text-4xl">{stage.title}</h2>
               <p className="mt-3 text-sm text-muted md:text-base">{stage.body}</p>
