@@ -23,8 +23,18 @@ export type SceneProps = {
   tagRef: RefObject<HTMLDivElement | null>;
 };
 
+/**
+ * Native sharpness: the screen's own pixel density, capped at 2× and at a 4K-sized pixel budget, so Retina and
+ * 4K displays get crisp output without huge 5K-class canvases. AdaptiveDpr still steps down if frames drop.
+ */
+function nativeDpr(mobile: boolean) {
+  const device = window.devicePixelRatio || 1;
+  const budget = (mobile ? 2_000_000 : 3840 * 2160) / (window.innerWidth * window.innerHeight);
+  return Math.max(1, Math.min(device, 2, Math.sqrt(budget)));
+}
+
 export default function Scene({ mobile, active, labelRefs, tagRef }: SceneProps) {
-  const maxDpr = mobile ? 1.5 : 1.75;
+  const maxDpr = useMemo(() => nativeDpr(mobile), [mobile]);
   const { background, accent } = useTheme().tokens;
   return (
     <Canvas
@@ -57,7 +67,8 @@ export default function Scene({ mobile, active, labelRefs, tagRef }: SceneProps)
       <LabelProjector labelRefs={labelRefs} tagRef={tagRef} />
       <AdaptiveDpr max={maxDpr} />
 
-      <EffectComposer multisampling={mobile ? 0 : 4}>
+      {/* At high pixel density 2× MSAA is enough; 4× only pays off at 1×. */}
+      <EffectComposer multisampling={mobile ? 0 : maxDpr >= 1.75 ? 2 : 4}>
         <Bloom mipmapBlur intensity={1.15} luminanceThreshold={0.9} luminanceSmoothing={0.25} radius={0.78} />
         <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
         <Vignette offset={0.28} darkness={0.82} />
@@ -92,7 +103,7 @@ function Environment() {
     const pmrem = new THREE.PMREMGenerator(gl);
     const env = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
     scene.environment = env;
-    scene.environmentIntensity = 0.5;
+    scene.environmentIntensity = 0.65;
     return () => {
       scene.environment = null;
       env.dispose();
@@ -293,7 +304,8 @@ function CameraRig({ mobile }: { mobile: boolean }) {
     tmp.pos.y += state.pointer.y * 0.25;
 
     // GSAP scrub + Lenis already smooth the inputs; this only removes residual jitter.
-    const damp = 1 - Math.exp(-dt * 9);
+    // Softer follow: the camera glides between shots instead of tracking every wheel tick.
+    const damp = 1 - Math.exp(-dt * 6);
     state.camera.position.lerp(tmp.pos, damp);
     tmp.current.lerp(tmp.look, damp);
     state.camera.lookAt(tmp.current);
@@ -346,24 +358,36 @@ function LabelProjector({ labelRefs, tagRef }: Pick<SceneProps, "labelRefs" | "t
 
 const TAG_LIFT = new THREE.Vector3(0, 0.55, 0);
 
-/** Steps the pixel ratio down when frames drop and back up when there is headroom. */
+/**
+ * Steps the pixel ratio down when frames drop and back up when there is headroom. Ignores the first seconds
+ * (shader compilation, first uploads) and needs two slow windows in a row, so a single hitch never costs sharpness.
+ */
 function AdaptiveDpr({ max }: { max: number }) {
   const setDpr = useThree((s) => s.setDpr);
-  const acc = useRef({ time: 0, frames: 0, dpr: max });
+  const acc = useRef({ time: 0, frames: 0, dpr: max, warmup: 2.5, slow: 0 });
   useFrame((_, dt) => {
     const a = acc.current;
+    if (a.warmup > 0) {
+      a.warmup -= dt;
+      return;
+    }
     a.time += dt;
     a.frames++;
     if (a.time < 1.5) return;
     const fps = a.frames / a.time;
-    if (fps < 45 && a.dpr > 0.75) a.dpr = Math.max(0.75, a.dpr - 0.25);
-    else if (fps > 58 && a.dpr < max) a.dpr = Math.min(max, a.dpr + 0.25);
-    else {
-      a.time = a.frames = 0;
-      return;
-    }
-    setDpr(a.dpr);
     a.time = a.frames = 0;
+    a.slow = fps < 45 ? a.slow + 1 : 0;
+    let next = a.dpr;
+    if (a.slow >= 2 && a.dpr > 0.75) {
+      next = Math.max(0.75, a.dpr - 0.25);
+      a.slow = 0;
+    } else if (fps > 57 && a.dpr < max) {
+      next = Math.min(max, a.dpr + 0.25);
+    }
+    if (next !== a.dpr) {
+      a.dpr = next;
+      setDpr(next);
+    }
   });
   return null;
 }
